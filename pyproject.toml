@@ -3,8 +3,8 @@ requires = ["setuptools>=77.0.3", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "swift_f0"
-version = "0.1.0"
+name = "swift-f0"
+version = "0.1.1"
 description = "Fast and accurate fundamental frequency (F0) detector using convolutional neural networks"
 readme = "README.md"
 requires-python = ">=3.8"
@@ -51,6 +51,6 @@ audio = ["librosa"]
 viz = ["matplotlib"]
 
 [project.urls]
-Homepage      = "https://github.com/lars76/swift_f0"
-"Bug Reports" = "https://github.com/lars76/swift_f0/issues"
-Source        = "https://github.com/lars76/swift_f0"
+Homepage      = "https://github.com/lars76/swift-f0"
+"Bug Reports" = "https://github.com/lars76/swift-f0/issues"
+Source        = "https://github.com/lars76/swift-f0"

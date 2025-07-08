@@ -11,7 +11,7 @@ In the [Pitch Detection Benchmark](https://github.com/lars76/pitch-benchmark/), 
 ## 🚀 Installation
 
 ```bash
-pip install swift_f0
+pip install swift-f0
 ```
 
 **Optional dependencies**:

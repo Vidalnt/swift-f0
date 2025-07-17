@@ -1,5 +1,10 @@
 # SwiftF0
 
+[![PyPI version](https://img.shields.io/pypi/v/swift-f0.svg)](https://pypi.org/project/swift-f0/)
+[![License](https://img.shields.io/github/license/lars76/swift_f0.svg)](https://github.com/lars76/swift_f0/blob/main/LICENSE)
+[![Demo](https://img.shields.io/badge/demo-online-blue.svg)](https://swift-f0.github.io/)
+[![Pitch Benchmark](https://img.shields.io/badge/benchmark-pitch--benchmark-green.svg)](https://github.com/lars76/pitch-benchmark/)
+
 **SwiftF0** is a fast and accurate F0 detector that works by first converting audio into a spectrogram using an STFT, then applying a 2D convolutional neural network to estimate pitch. It’s optimized for:
 
 * ⚡ Real-time analysis (132 ms for 5 seconds of audio on CPU)
@@ -7,6 +12,12 @@
 * 🗣️ Speech Analysis
 
 In the [Pitch Detection Benchmark](https://github.com/lars76/pitch-benchmark/), SwiftF0 outperforms algorithms like CREPE in both speed and accuracy. It supports frequencies between **46.875 Hz and 2093.75 Hz** (G1 to C7).
+
+## 🧪 Live Demo
+
+The demo runs entirely client-side using WebAssembly and ONNX.js, so your audio stays private.
+
+👉 [**swift-f0.github.io**](https://swift-f0.github.io/)
 
 ## 🚀 Installation
 

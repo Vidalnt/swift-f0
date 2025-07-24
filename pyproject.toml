@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "swift-f0"
-version = "0.1.1"
+version = "0.1.2"
 description = "Fast and accurate fundamental frequency (F0) detector using convolutional neural networks"
 readme = "README.md"
 requires-python = ">=3.8"
@@ -38,6 +38,7 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
     "Topic :: Multimedia :: Sound/Audio :: Analysis",
+    "Topic :: Multimedia :: Sound/Audio :: MIDI",
 ]
 
 dependencies = [
@@ -46,9 +47,11 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-full = ["librosa", "matplotlib"]
+full = ["librosa", "matplotlib", "mido"]
 audio = ["librosa"]
 viz = ["matplotlib"]
+midi = ["mido"]
+music = ["mido", "matplotlib"]
 
 [project.urls]
 Homepage      = "https://github.com/lars76/swift-f0"

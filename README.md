@@ -201,10 +201,13 @@ See [CHANGELOG.md](CHANGELOG.md) for detailed version history and updates.
 If you use SwiftF0 in your research, please cite:
 
 ```bibtex
-@software{swiftf0,
-    title={SwiftF0: Fast and Accurate Fundamental Frequency Detection},
-    author={Lars Nieradzik},
-    url={https://github.com/lars76/swift-f0},
-    year={2025}
+@misc{nieradzik2025swiftf0,
+      title={SwiftF0: Fast and Accurate Monophonic Pitch Detection},
+      author={Lars Nieradzik},
+      year={2025},
+      eprint={2508.18440},
+      archivePrefix={arXiv},
+      primaryClass={cs.SD},
+      url={https://arxiv.org/abs/2508.18440},
 }
 ```

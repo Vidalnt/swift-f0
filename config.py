@@ -66,4 +66,10 @@ MODEL_SAVE_PATH = os.path.join(CHECKPOINT_DIR, "swiftf0_model.pth")
 # Used by export.py
 EXPORT_PARAMS = {
     'opset_version': 11, # ONNX opset version
-    '
+    'simplify': True     # Simplify ONNX model after export
+}
+
+# Example of how to use in train.py:
+# from config import MODEL_PARAMS, TRAINING_PARAMS, ...
+# model = create_model(**MODEL_PARAMS)
+# dataloader = create_dataloader(TRAIN_DATA_PATHS, batch_size=TRAINING_PARAMS['batch_size'], **MODEL_PARAMS)

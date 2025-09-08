@@ -8,21 +8,21 @@ class SwiftF0Model(nn.Module):
     SwiftF0 model architecture based on the ONNX inspection and paper.
     
     Key features:
-    - STFT-based processing with specific parameters (N=1024, H=256, fs=16kHz)
-    - Spectral slicing to retain only relevant frequency bins (K_min=3, K_max=134)
+    - STFT-based processing with configurable parameters
+    - Spectral slicing to retain only relevant frequency bins (K_min=3, K_max=134 by default)
     - Log compression of spectrogram
-    - Compact CNN architecture with 6 conv layers (5x5 kernels, SAME padding)
+    - Compact CNN architecture with 5 conv layers (5x5 kernels, SAME padding)
     - Batch normalization after each conv layer
     - Configurable number of pitch bins
     - Joint classification and regression training
     """
     
     def __init__(self, 
-                 n_bins: int = 200, 
+                 n_bins: int = 200, # Configurable, e.g., 360 for CREPE-style
                  f_min: float = 46.875, 
                  f_max: float = 2093.75, 
                  sample_rate: int = 16000,
-                 hop_length: int = 256,
+                 hop_length: int = 256, # Configurable, e.g., 160
                  n_fft: int = 1024,
                  k_min: int = 3,
                  k_max: int = 134):
@@ -30,14 +30,14 @@ class SwiftF0Model(nn.Module):
         Initialize the SwiftF0 model.
         
         Args:
-            n_bins: Number of pitch bins (default: 200)
-            f_min: Minimum frequency in Hz (default: 46.875)
-            f_max: Maximum frequency in Hz (default: 2093.75)
-            sample_rate: Audio sample rate (default: 16000)
-            hop_length: STFT hop length (default: 256)
-            n_fft: STFT window size (default: 1024)
-            k_min: Minimum frequency bin index to retain (default: 3)
-            k_max: Maximum frequency bin index to retain (default: 134)
+            n_bins: Number of pitch bins (default: 200, can be set to 360 for CREPE-style).
+            f_min: Minimum frequency in Hz (default: 46.875).
+            f_max: Maximum frequency in Hz (default: 2093.75).
+            sample_rate: Audio sample rate (default: 16000).
+            hop_length: STFT hop length (default: 256, can be set to 160).
+            n_fft: STFT window size (default: 1024).
+            k_min: Minimum frequency bin index to retain after slicing (default: 3).
+            k_max: Maximum frequency bin index to retain after slicing (default: 134).
         """
         super(SwiftF0Model, self).__init__()
         
@@ -50,13 +50,19 @@ class SwiftF0Model(nn.Module):
         self.k_min = k_min
         self.k_max = k_max
         
-        # Create log-spaced frequency bins (matching the paper)
+        # Calculate the number of frequency bins after slicing
+        # This is crucial for the freq_projection layer
+        self.sliced_freq_bins = k_max - k_min
+        
+        # Create log-spaced frequency bins for pitch output
+        # Shape: [n_bins]
         self.register_buffer('pitch_bin_centers', torch.tensor(
             self._create_log_spaced_bins(n_bins, f_min, f_max)
         ))
         
-        # Network architecture based on ONNX inspection
-        # 6 conv layers with 5x5 kernels, SAME padding, BatchNorm, ReLU activation
+        # Network architecture based on ONNX inspection and paper
+        # 5 conv layers with 5x5 kernels, SAME padding, BatchNorm, ReLU activation
+        # Followed by 1 final conv layer reducing channels to 1
         self.conv_layers = nn.Sequential(
             # Layer 1: 1 -> 8 channels
             nn.Conv2d(1, 8, kernel_size=5, padding=2),  # SAME padding
@@ -84,11 +90,11 @@ class SwiftF0Model(nn.Module):
             nn.ReLU(),
         )
         
-        # Final projection layer: k_max-k_min -> n_bins channels, 1x1 kernel
+        # Final projection layer: sliced_freq_bins -> n_bins channels, 1x1 kernel
         # According to ONNX inspection, freq_projection.weight has shape (200, 132, 1)
-        # This means in_channels=132 (k_max-k_min=134-3=131, but ONNX shows 132)
-        # We'll use k_max-k_min = 131 as the input channels
-        self.freq_projection = nn.Conv1d(k_max - k_min, n_bins, kernel_size=1)
+        # This means in_channels=sliced_freq_bins (e.g., 131 for k_max=134, k_min=3)
+        # and out_channels=n_bins (e.g., 200 or 360).
+        self.freq_projection = nn.Conv1d(self.sliced_freq_bins, n_bins, kernel_size=1)
         
     def _create_log_spaced_bins(self, n_bins: int, f_min: float, f_max: float) -> np.ndarray:
         """Create log-spaced frequency bins matching the paper."""
@@ -101,12 +107,14 @@ class SwiftF0Model(nn.Module):
         
         Args:
             x: Input tensor of shape (batch_size, audio_length)
-                This is the raw audio input, STFT computed internally
+                This is the raw audio input, STFT computed internally.
             
         Returns:
             tuple: (pitch_logits, confidence)
                 - pitch_logits: (batch_size, n_bins, n_frames)
                 - confidence: (batch_size, n_frames)
+                  Note: This is a basic confidence (sum of softmax probs).
+                  For ONNX-like confidence, a more complex windowing logic is needed.
         """
         # Compute STFT internally (matching paper parameters)
         # x is raw audio [batch, samples]
@@ -116,7 +124,7 @@ class SwiftF0Model(nn.Module):
             hop_length=self.hop_length, 
             win_length=self.n_fft,
             window=torch.hann_window(self.n_fft, device=x.device),
-            center=True,
+            center=True, # PyTorch default padding, similar to ONNX padding effect
             pad_mode='reflect',
             normalized=False,
             onesided=True,
@@ -124,57 +132,75 @@ class SwiftF0Model(nn.Module):
         )
         
         # Get magnitude spectrogram
-        mag_spec = torch.abs(stft)  # [batch, freq_bins, time_frames]
+        # Shape: [batch, freq_bins, time_frames]
         # For n_fft=1024, freq_bins = 513
+        mag_spec = torch.abs(stft)
         
-        # Add channel dimension
-        mag_spec = mag_spec.unsqueeze(1)  # [batch, 1, freq_bins, time_frames]
+        # Add channel dimension for Conv2D
+        # Shape: [batch, 1, freq_bins, time_frames]
+        mag_spec = mag_spec.unsqueeze(1)
         
-        # Slice the spectrogram to retain only relevant frequency bins
+        # --- Core SwiftF0 Processing Steps ---
+        
+        # 1. Slice the spectrogram to retain only relevant frequency bins
         # According to paper: K_min=3, K_max=134 (131 bins retained)
-        mag_spec = mag_spec[:, :, self.k_min:self.k_max, :]  # [batch, 1, 131, time_frames]
+        # Shape: [batch, 1, sliced_freq_bins, time_frames]
+        mag_spec = mag_spec[:, :, self.k_min:self.k_max, :]
         
-        # Apply log compression (with small epsilon to avoid log(0))
+        # 2. Apply log compression (with small epsilon to avoid log(0))
+        # This is a standard preprocessing step for spectrograms.
         epsilon = 1e-8
-        mag_spec = torch.log(mag_spec + epsilon)  # [batch, 1, 131, time_frames]
+        mag_spec = torch.log(mag_spec + epsilon) # Shape: [batch, 1, sliced_freq_bins, time_frames]
         
-        # Apply convolutional layers
-        features = self.conv_layers(mag_spec)  # [batch, 1, 131, time_frames]
+        # 3. Apply convolutional layers (Conv2D -> BN -> ReLU)
+        # Shape after conv_layers: [batch, 1, sliced_freq_bins, time_frames]
+        features = self.conv_layers(mag_spec)
         
-        # Squeeze channel dimension and rearrange dimensions
-        features = features.squeeze(1)  # [batch, 131, time_frames]
+        # 4. Squeeze channel dimension and rearrange dimensions for Conv1D
+        # Shape: [batch, sliced_freq_bins, time_frames]
+        features = features.squeeze(1) # Remove the channel dim which is now 1
         
-        # Apply frequency projection
-        logits = self.freq_projection(features)  # [batch, n_bins, time_frames]
+        # 5. Apply frequency projection to map to pitch bins
+        # Input: [batch, sliced_freq_bins, time_frames]
+        # Output: [batch, n_bins, time_frames]
+        logits = self.freq_projection(features)
         
+        # 6. Compute basic confidence (sum of softmax probabilities)
         # Apply softmax to get probability distribution
-        probs = F.softmax(logits, dim=1)
+        probs = F.softmax(logits, dim=1) # Shape: [batch, n_bins, time_frames]
         
-        # Compute confidence as sum of probabilities (should be 1, but can be less if model is uncertain)
-        confidence = torch.sum(probs, dim=1)  # [batch, n_frames]
+        # Compute confidence as sum of probabilities
+        # This is a simple measure of how much probability mass is assigned.
+        # The ONNX model uses a more complex windowing approach for confidence.
+        confidence = torch.sum(probs, dim=1) # Shape: [batch, n_frames]
         
+        # Return logits for loss computation and basic confidence
         return logits, confidence
     
     def decode_pitch(self, logits: torch.Tensor) -> torch.Tensor:
         """
         Decode pitch from logits using local expected value method.
-        
+        This is typically used during inference or for computing regression loss.
+        It matches the approach described in the paper for computing f̂_log[m].
+
         Args:
-            logits: Logits from the model (batch_size, n_bins, n_frames)
+            logits: Logits from the model (batch_size, n_bins, n_frames).
             
         Returns:
-            pitch_hz: Pitch estimates in Hz (batch_size, n_frames)
+            pitch_hz: Pitch estimates in Hz (batch_size, n_frames).
         """
         # Apply softmax to get probabilities
-        probs = F.softmax(logits, dim=1)
+        probs = F.softmax(logits, dim=1) # Shape: [batch, n_bins, n_frames]
         
         # Compute expected frequency using pitch_bin_centers
         # Expand pitch_bin_centers to match batch and time dimensions
+        # pitch_bin_centers: [n_bins] -> [1, n_bins, 1] -> [batch, n_bins, n_frames]
         batch_size, _, n_frames = logits.shape
         pitch_bins_expanded = self.pitch_bin_centers.unsqueeze(0).unsqueeze(-1).expand(batch_size, -1, n_frames)
         
-        # Compute weighted sum
-        expected_pitch = torch.sum(probs * pitch_bins_expanded, dim=1)  # [batch, n_frames]
+        # Compute weighted sum (expected value in linear frequency domain)
+        # Sum over the n_bins dimension
+        expected_pitch = torch.sum(probs * pitch_bins_expanded, dim=1) # [batch, n_frames]
         
         return expected_pitch
 
@@ -184,9 +210,9 @@ def create_model(**kwargs) -> SwiftF0Model:
     Create a SwiftF0 model instance.
     
     Args:
-        **kwargs: Model parameters (n_bins, f_min, f_max, sample_rate, hop_length, n_fft, k_min, k_max)
+        **kwargs: Model parameters (n_bins, f_min, f_max, sample_rate, hop_length, n_fft, k_min, k_max).
         
     Returns:
-        SwiftF0Model instance
+        SwiftF0Model instance.
     """
     return SwiftF0Model(**kwargs)

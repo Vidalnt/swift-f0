@@ -78,31 +78,26 @@ class SwiftF0Loss(nn.Module):
         
         Args:
             logits: Logits from the model (batch_size, n_bins, n_frames)
-            device: Device to create pitch bins on
+            device: Device to create pitch bins on (not used here as pitch_bin_centers is in the model)
             
         Returns:
             Decoded log F0 values (batch_size, n_frames)
         """
-        batch_size, n_bins, n_frames = logits.shape
+        # This function is kept for conceptual clarity in the loss, 
+        # but in practice, the model's pitch_bin_centers buffer should be used.
+        # The actual implementation for loss calculation would ideally get the model instance
+        # or the pitch_bin_centers buffer passed to it.
+        # For now, we assume the model's decode method or the dataset handles this correctly.
+        # A more robust approach would be to pass the pitch_bin_centers to the loss function.
+        # However, to keep the interface simple, we'll note this dependency.
         
-        # Create pitch bins (this should match the model's pitch_bin_centers)
-        # These are hardcoded to match SwiftF0 paper parameters
-        f_min, f_max = 46.875, 2093.75
-        pitch_bins = f_min * (f_max / f_min) ** (torch.arange(n_bins, device=device) / (n_bins - 1))
-        
-        # Convert to log space
-        log_pitch_bins = torch.log(pitch_bins)
-        
-        # Apply softmax to get probabilities
-        probs = F.softmax(logits, dim=1)
-        
-        # Expand log_pitch_bins to match batch and time dimensions
-        log_pitch_bins_expanded = log_pitch_bins.unsqueeze(0).unsqueeze(-1).expand(batch_size, -1, n_frames)
-        
-        # Compute weighted sum (expected value in log frequency domain)
-        expected_log_pitch = torch.sum(probs * log_pitch_bins_expanded, dim=1)  # [batch, n_frames]
-        
-        return expected_log_pitch
+        # This is a placeholder to indicate the dependency. 
+        # The correct way is to compute E[log(f)] using the model's self.pitch_bin_centers
+        # outside this function or by passing it as an argument.
+        # For the purpose of this code structure, we'll raise a note.
+        raise NotImplementedError("This method should ideally use the model's pitch_bin_centers. "
+                                  "Consider computing E[log(f)] directly in the training loop "
+                                  "using the model's buffer for accuracy.")
 
 # Function to create loss instance
 def create_loss(**kwargs) -> SwiftF0Loss:
@@ -116,3 +111,70 @@ def create_loss(**kwargs) -> SwiftF0Loss:
         SwiftF0Loss instance
     """
     return SwiftF0Loss(**kwargs)
+
+# --- Recommended approach for computing regression loss ---
+# In your training loop, after getting logits from the model:
+# 1. Get probs: probs = F.softmax(logits, dim=1)
+# 2. Get log pitch bins from model buffer: log_pitch_bins = torch.log(model.pitch_bin_centers)
+# 3. Expand: log_pitch_bins_expanded = log_pitch_bins.unsqueeze(0).unsqueeze(-1).expand_as(probs)
+# 4. Compute E[log(f)]: predicted_log_f0 = torch.sum(probs * log_pitch_bins_expanded, dim=1)
+# 5. Compute regression loss: regression_loss = F.l1_loss(predicted_log_f0, log_target_f0)
+# This avoids the complexity and potential mismatch in the loss class itself.
+
+# Simplified loss function for direct use in training loop context
+def compute_swiftf0_loss(model: torch.nn.Module, 
+                         pitch_logits: torch.Tensor, 
+                         classification_targets: torch.Tensor,
+                         target_f0: torch.Tensor,
+                         classification_weight: float = 1.0,
+                         regression_weight: float = 1.0) -> tuple:
+    """
+    Compute the combined SwiftF0 loss using the model's buffers for accuracy.
+    This is the recommended way to compute the loss during training.
+    
+    Args:
+        model: The SwiftF0Model instance (to access pitch_bin_centers).
+        pitch_logits: Output logits from model (batch_size, n_bins, n_frames).
+        classification_targets: Target probability distributions (batch_size, n_bins, n_frames).
+        target_f0: Target F0 values in Hz (batch_size, n_frames).
+        classification_weight: Weight for classification loss.
+        regression_weight: Weight for regression loss.
+        
+    Returns:
+        tuple: (total_loss, classification_loss, regression_loss)
+    """
+    batch_size, n_bins, n_frames = pitch_logits.shape
+    
+    # --- Classification Loss ---
+    logits_reshaped = pitch_logits.permute(0, 2, 1).reshape(-1, n_bins)
+    targets_reshaped = classification_targets.permute(0, 2, 1).reshape(-1, n_bins)
+    hard_targets = torch.argmax(targets_reshaped, dim=1)
+    classification_loss = F.cross_entropy(logits_reshaped, hard_targets, reduction='mean')
+    
+    # --- Regression Loss (Lcents) ---
+    # Apply softmax to get probabilities
+    probs = F.softmax(pitch_logits, dim=1) # Shape: [B, n_bins, n_frames]
+    
+    # Get log pitch bins from model buffer
+    # model.pitch_bin_centers: [n_bins]
+    log_pitch_bins = torch.log(model.pitch_bin_centers + 1e-8) # [n_bins]
+    
+    # Expand to match probability tensor dimensions
+    # [n_bins] -> [1, n_bins, 1] -> [B, n_bins, n_frames]
+    log_pitch_bins_expanded = log_pitch_bins.unsqueeze(0).unsqueeze(-1).expand_as(probs)
+    
+    # Compute expected value in log space: E[log(f)] = sum(p * log(f_b))
+    # Sum over the n_bins dimension (dim=1)
+    predicted_log_f0 = torch.sum(probs * log_pitch_bins_expanded, dim=1) # [B, n_frames]
+    
+    # Target log frequencies
+    epsilon = 1e-8
+    log_target_f0 = torch.log(target_f0 + epsilon) # [B, n_frames]
+    
+    # L1 loss on log frequencies
+    regression_loss = F.l1_loss(predicted_log_f0, log_target_f0)
+    
+    # --- Combined Loss ---
+    total_loss = classification_weight * classification_loss + regression_weight * regression_loss
+    
+    return total_loss, classification_loss, regression_loss

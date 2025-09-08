@@ -1,5 +1,8 @@
 # SwiftF0
 
+> [!NOTE]
+> This repository implements an unofficial training code for SwiftF0, thanks to the power of the vibecoding.
+
 [![PyPI version](https://img.shields.io/pypi/v/swift-f0.svg)](https://pypi.org/project/swift-f0/)
 [![License](https://img.shields.io/github/license/lars76/swift_f0.svg)](https://github.com/lars76/swift_f0/blob/main/LICENSE)
 [![Demo](https://img.shields.io/badge/demo-online-blue.svg)](https://swift-f0.github.io/)

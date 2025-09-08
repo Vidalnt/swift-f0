@@ -8,10 +8,12 @@ TEST_DATA_DIR = os.path.join(DATA_DIR, "test")
 
 # Model parameters
 MODEL_PARAMS = {
-    'n_bins': 360,
-    'f_min': 46.875,
-    'f_max': 2093.75,
-    'sample_rate': 16000
+    'n_bins': 200,        # Number of pitch bins
+    'f_min': 46.875,      # Minimum frequency in Hz
+    'f_max': 2093.75,     # Maximum frequency in Hz
+    'sample_rate': 16000, # Audio sample rate
+    'hop_length': 256,    # STFT hop length
+    'n_fft': 1024         # STFT window size
 }
 
 # Training parameters

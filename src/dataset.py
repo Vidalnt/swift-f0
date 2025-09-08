@@ -11,14 +11,17 @@ class SwiftF0Dataset(Dataset):
     Dataset class for SwiftF0 training.
     
     Handles loading of audio files and their corresponding pitch annotations,
-    with data augmentation and preprocessing.
+    with data augmentation and preprocessing matching the paper.
     """
     
     def __init__(self, 
                  data_paths: list,
                  sample_rate: int = 16000,
-                 frame_length: int = 1024,
                  hop_length: int = 256,
+                 n_fft: int = 1024,
+                 n_bins: int = 200,
+                 f_min: float = 46.875,
+                 f_max: float = 2093.75,
                  augment: bool = True,
                  noise_factor: float = 0.001):
         """
@@ -27,19 +30,32 @@ class SwiftF0Dataset(Dataset):
         Args:
             data_paths: List of paths to data files (audio + pitch annotations)
             sample_rate: Target sample rate for audio
-            frame_length: STFT frame length
             hop_length: STFT hop length
+            n_fft: STFT window size
+            n_bins: Number of pitch bins
+            f_min: Minimum frequency in Hz
+            f_max: Maximum frequency in Hz
             augment: Whether to apply data augmentation
             noise_factor: Factor for additive noise augmentation
         """
         self.data_paths = data_paths
         self.sample_rate = sample_rate
-        self.frame_length = frame_length
         self.hop_length = hop_length
+        self.n_fft = n_fft
+        self.n_bins = n_bins
+        self.f_min = f_min
+        self.f_max = f_max
         self.augment = augment
         self.noise_factor = noise_factor
         
-    def __len__(self):
+        # Create log-spaced frequency bins
+        self.pitch_bins = self._create_log_spaced_bins()
+        
+    def _create_log_spaced_bins(self) -> np.ndarray:
+        """Create log-spaced frequency bins."""
+        return self.f_min * (self.f_max / self.f_min) ** (np.arange(self.n_bins) / (self.n_bins - 1))
+        
+    def __len__(self) -> int:
         return len(self.data_paths)
     
     def __getitem__(self, idx: int) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
@@ -47,7 +63,10 @@ class SwiftF0Dataset(Dataset):
         Get a single training example.
         
         Returns:
-            tuple: (spectrogram, pitch_classification_target, pitch_regression_target)
+            tuple: (audio, pitch_classification_target, target_f0)
+                - audio: Raw audio tensor (1, audio_length)
+                - pitch_classification_target: Target probability distribution (n_bins, n_frames)
+                - target_f0: Target F0 values in Hz (n_frames,)
         """
         # Load data file
         data_path = self.data_paths[idx]
@@ -61,9 +80,8 @@ class SwiftF0Dataset(Dataset):
         if self.augment:
             audio = self._augment_audio(audio)
         
-        # Compute STFT magnitude spectrogram
-        stft = librosa.stft(audio, n_fft=self.frame_length, hop_length=self.hop_length)
-        magnitude = np.abs(stft)  # Shape: (n_freq_bins, n_frames)
+        # Convert to tensor
+        audio_tensor = torch.from_numpy(audio).float().unsqueeze(0)  # Add batch dimension
         
         # Load pitch annotations
         pitch_data = np.loadtxt(pitch_path)  # Assuming format: [time, f0, confidence]
@@ -71,55 +89,36 @@ class SwiftF0Dataset(Dataset):
         f0_values = pitch_data[:, 1]
         confidences = pitch_data[:, 2]
         
-        # Align pitch annotations with STFT frames
-        n_frames = magnitude.shape[1]
+        # Compute STFT to get frame times
+        stft = librosa.stft(audio, n_fft=self.n_fft, hop_length=self.hop_length)
+        n_frames = stft.shape[1]
         frame_times = np.arange(n_frames) * self.hop_length / self.sample_rate
         
         # Interpolate pitch values to match frame times
         f0_aligned = np.interp(frame_times, times, f0_values, left=0, right=0)
         confidence_aligned = np.interp(frame_times, times, confidences, left=0, right=0)
         
-        # Create targets
-        # Only use frames with high confidence
+        # Create targets only for voiced frames with high confidence
         voiced_mask = confidence_aligned > 0.5
         f0_voiced = f0_aligned[voiced_mask]
         
         if len(f0_voiced) == 0:
             # No voiced frames, return dummy data
-            spectrogram = torch.zeros(1, magnitude.shape[0], magnitude.shape[1])
-            classification_target = torch.zeros(360)  # Dummy target
-            regression_target = torch.tensor([0.0])
-            return spectrogram, classification_target, regression_target
+            dummy_target = torch.zeros(self.n_bins, n_frames)
+            dummy_f0 = torch.zeros(n_frames)
+            return audio_tensor, dummy_target, dummy_f0
         
-        # Select a random voiced frame for training
-        frame_idx = np.random.choice(np.where(voiced_mask)[0])
-        target_f0 = f0_aligned[frame_idx]
+        # Convert F0 values to classification targets
+        classification_targets = self._f0_to_classification_targets(f0_aligned, voiced_mask)
         
-        # Convert to classification target (one-hot-like distribution)
-        classification_target = self._f0_to_classification_target(target_f0)
+        # Target F0 values (for regression loss)
+        target_f0 = torch.from_numpy(f0_aligned).float()
         
-        # Regression target (log frequency)
-        regression_target = torch.tensor([np.log(target_f0)])
-        
-        # Extract spectrogram for the selected frame
-        # Use a context window around the frame
-        context_frames = 5
-        start_frame = max(0, frame_idx - context_frames)
-        end_frame = min(n_frames, frame_idx + context_frames + 1)
-        
-        spectrogram_segment = magnitude[:, start_frame:end_frame]
-        
-        # Normalize spectrogram
-        spectrogram_segment = (spectrogram_segment - np.mean(spectrogram_segment)) / (np.std(spectrogram_segment) + 1e-8)
-        
-        # Convert to tensor and add channel dimension
-        spectrogram = torch.from_numpy(spectrogram_segment).float().unsqueeze(0)  # Add channel dim
-        
-        return spectrogram, classification_target, regression_target
+        return audio_tensor, classification_targets, target_f0
     
     def _augment_audio(self, audio: np.ndarray) -> np.ndarray:
         """
-        Apply data augmentation to audio signal.
+        Apply data augmentation to audio signal, matching paper description.
         
         Args:
             audio: Input audio signal
@@ -132,47 +131,67 @@ class SwiftF0Dataset(Dataset):
             noise = np.random.randn(*audio.shape) * self.noise_factor * np.std(audio)
             audio = audio + noise
         
-        # Pitch shift
+        # Pitch shift (small variations)
         if random.random() < 0.3:
-            n_steps = random.uniform(-2, 2)
+            n_steps = random.uniform(-0.5, 0.5)  # Small pitch shifts
             audio = librosa.effects.pitch_shift(audio, sr=self.sample_rate, n_steps=n_steps)
         
-        # Time stretching
+        # Gain adjustment
         if random.random() < 0.2:
-            rate = random.uniform(0.9, 1.1)
-            audio = librosa.effects.time_stretch(audio, rate=rate)
+            gain = random.uniform(0.8, 1.2)
+            audio = audio * gain
+            
+        # Clipping to prevent overflow
+        audio = np.clip(audio, -1.0, 1.0)
         
         return audio
     
-    def _f0_to_classification_target(self, f0: float) -> torch.Tensor:
+    def _f0_to_classification_targets(self, f0_values: np.ndarray, voiced_mask: np.ndarray) -> torch.Tensor:
         """
-        Convert F0 value to classification target using Gaussian distribution.
+        Convert F0 values to classification targets using Gaussian distribution.
         
         Args:
-            f0: Fundamental frequency in Hz
+            f0_values: Array of F0 values in Hz
+            voiced_mask: Boolean mask indicating voiced frames
             
         Returns:
-            Classification target as probability distribution
+            Classification targets as probability distributions (n_bins, n_frames)
         """
-        # Create log-spaced frequency bins
-        f_min, f_max, n_bins = 46.875, 2093.75, 360
-        freq_bins = f_min * (f_max / f_min) ** (np.arange(n_bins) / (n_bins - 1))
+        n_frames = len(f0_values)
+        targets = np.zeros((self.n_bins, n_frames))
         
-        # Convert F0 to log frequency
-        log_f0 = np.log(f0 + 1e-8)  # Add small value to avoid log(0)
-        log_freq_bins = np.log(freq_bins)
+        # Convert pitch bins to log scale
+        log_pitch_bins = np.log(self.pitch_bins)
         
-        # Create Gaussian distribution centered at the F0
-        sigma = 0.1  # Standard deviation in log frequency space
-        distances = (log_freq_bins - log_f0) ** 2
-        probabilities = np.exp(-distances / (2 * sigma ** 2))
+        # Standard deviation in log frequency space (matching paper)
+        sigma = 0.1
         
-        # Normalize
-        probabilities = probabilities / (np.sum(probabilities) + 1e-8)
+        for i in range(n_frames):
+            if voiced_mask[i] and f0_values[i] > 0:
+                # Convert F0 to log frequency
+                log_f0 = np.log(f0_values[i])
+                
+                # Create Gaussian distribution centered at the F0
+                distances = (log_pitch_bins - log_f0) ** 2
+                probabilities = np.exp(-distances / (2 * sigma ** 2))
+                
+                # Normalize
+                probabilities_sum = np.sum(probabilities)
+                if probabilities_sum > 0:
+                    probabilities = probabilities / probabilities_sum
+                    targets[:, i] = probabilities
+                else:
+                    # If normalization fails, use a sharp peak
+                    closest_bin = np.argmin(np.abs(self.pitch_bins - f0_values[i]))
+                    targets[closest_bin, i] = 1.0
+            # For unvoiced frames, targets remain zero (no probability mass)
         
-        return torch.from_numpy(probabilities).float()
+        return torch.from_numpy(targets).float()
 
-def create_dataloader(data_paths: list, batch_size: int = 32, shuffle: bool = True, **kwargs) -> DataLoader:
+def create_dataloader(data_paths: list, 
+                      batch_size: int = 32, 
+                      shuffle: bool = True, 
+                      **kwargs) -> DataLoader:
     """
     Create a DataLoader for SwiftF0 training.
     

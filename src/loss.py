@@ -55,15 +55,15 @@ class SwiftF0Loss(nn.Module):
         
         # Regression loss (L1 on log frequencies, matching paper Eq. 5)
         # First decode predicted pitch from logits using the same method as in model.decode_pitch
-        predicted_f0 = self._decode_f0_from_logits(pitch_logits, targets_reshaped.device)  # (batch_size, n_frames)
+        # But we need to compute the expected value in log space as per the paper
+        predicted_log_f0 = self._decode_log_f0_from_logits(pitch_logits, targets_reshaped.device)  # (batch_size, n_frames)
         
         # Compute log frequencies (add small epsilon to prevent log(0))
         epsilon = 1e-8
         log_target_f0 = torch.log(target_f0 + epsilon)
-        log_predicted_f0 = torch.log(predicted_f0 + epsilon)
         
         # L1 loss on log frequencies (cents error up to constant factor)
-        regression_loss = F.l1_loss(log_predicted_f0, log_target_f0)
+        regression_loss = F.l1_loss(predicted_log_f0, log_target_f0)
         
         # Combined loss (Eq. 6 in paper)
         total_loss = (self.classification_weight * classification_loss + 
@@ -71,9 +71,9 @@ class SwiftF0Loss(nn.Module):
         
         return total_loss, classification_loss, regression_loss
     
-    def _decode_f0_from_logits(self, logits: torch.Tensor, device: torch.device) -> torch.Tensor:
+    def _decode_log_f0_from_logits(self, logits: torch.Tensor, device: torch.device) -> torch.Tensor:
         """
-        Internal helper to decode F0 from logits using expected value method.
+        Internal helper to decode log F0 from logits using expected value method in log space.
         This matches the approach described in the paper for computing f̂_log[m].
         
         Args:
@@ -81,7 +81,7 @@ class SwiftF0Loss(nn.Module):
             device: Device to create pitch bins on
             
         Returns:
-            Decoded F0 values in Hz (batch_size, n_frames)
+            Decoded log F0 values (batch_size, n_frames)
         """
         batch_size, n_bins, n_frames = logits.shape
         
@@ -90,16 +90,19 @@ class SwiftF0Loss(nn.Module):
         f_min, f_max = 46.875, 2093.75
         pitch_bins = f_min * (f_max / f_min) ** (torch.arange(n_bins, device=device) / (n_bins - 1))
         
+        # Convert to log space
+        log_pitch_bins = torch.log(pitch_bins)
+        
         # Apply softmax to get probabilities
         probs = F.softmax(logits, dim=1)
         
-        # Expand pitch_bins to match batch and time dimensions
-        pitch_bins_expanded = pitch_bins.unsqueeze(0).unsqueeze(-1).expand(batch_size, -1, n_frames)
+        # Expand log_pitch_bins to match batch and time dimensions
+        log_pitch_bins_expanded = log_pitch_bins.unsqueeze(0).unsqueeze(-1).expand(batch_size, -1, n_frames)
         
-        # Compute weighted sum (expected value in linear frequency domain)
-        expected_pitch = torch.sum(probs * pitch_bins_expanded, dim=1)  # [batch, n_frames]
+        # Compute weighted sum (expected value in log frequency domain)
+        expected_log_pitch = torch.sum(probs * log_pitch_bins_expanded, dim=1)  # [batch, n_frames]
         
-        return expected_pitch
+        return expected_log_pitch
 
 # Function to create loss instance
 def create_loss(**kwargs) -> SwiftF0Loss:

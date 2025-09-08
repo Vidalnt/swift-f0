@@ -13,7 +13,9 @@ MODEL_PARAMS = {
     'f_max': 2093.75,     # Maximum frequency in Hz
     'sample_rate': 16000, # Audio sample rate
     'hop_length': 256,    # STFT hop length
-    'n_fft': 1024         # STFT window size
+    'n_fft': 1024,        # STFT window size
+    'k_min': 3,           # Minimum frequency bin index to retain
+    'k_max': 134          # Maximum frequency bin index to retain
 }
 
 # Training parameters

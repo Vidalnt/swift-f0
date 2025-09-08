@@ -23,7 +23,8 @@ class SwiftF0Dataset(Dataset):
                  f_min: float = 46.875,
                  f_max: float = 2093.75,
                  augment: bool = True,
-                 noise_factor: float = 0.001):
+                 noise_snr_range: Tuple[float, float] = (10, 30),  # SNR range in dB
+                 gain_db_range: Tuple[float, float] = (-6, 6)):   # Gain range in dB
         """
         Initialize the dataset.
         
@@ -36,7 +37,8 @@ class SwiftF0Dataset(Dataset):
             f_min: Minimum frequency in Hz
             f_max: Maximum frequency in Hz
             augment: Whether to apply data augmentation
-            noise_factor: Factor for additive noise augmentation
+            noise_snr_range: Range of SNR values for noise addition (dB)
+            gain_db_range: Range of gain adjustments (dB)
         """
         self.data_paths = data_paths
         self.sample_rate = sample_rate
@@ -46,7 +48,8 @@ class SwiftF0Dataset(Dataset):
         self.f_min = f_min
         self.f_max = f_max
         self.augment = augment
-        self.noise_factor = noise_factor
+        self.noise_snr_range = noise_snr_range
+        self.gain_db_range = gain_db_range
         
         # Create log-spaced frequency bins
         self.pitch_bins = self._create_log_spaced_bins()
@@ -126,25 +129,71 @@ class SwiftF0Dataset(Dataset):
         Returns:
             Augmented audio signal
         """
-        # Additive noise
+        # Gain adjustment
         if random.random() < 0.5:
-            noise = np.random.randn(*audio.shape) * self.noise_factor * np.std(audio)
-            audio = audio + noise
-        
+            gain_db = random.uniform(self.gain_db_range[0], self.gain_db_range[1])
+            gain_factor = 10**(gain_db/20)  # Convert dB to linear scale
+            audio = audio * gain_factor
+            
+        # Add noise with SNR control (matching paper description)
+        if random.random() < 0.5:
+            # Generate noise (could be white, pink, or brown noise)
+            noise_type = random.choice(['white', 'pink', 'brown'])
+            noise = self._generate_noise(len(audio), noise_type)
+            
+            # Calculate SNR
+            snr_db = random.uniform(self.noise_snr_range[0], self.noise_snr_range[1])
+            
+            # Calculate signal and noise power
+            signal_power = np.mean(audio**2)
+            noise_power = np.mean(noise**2)
+            
+            # Calculate scaling factor for desired SNR
+            if noise_power > 0:
+                scaling_factor = np.sqrt(signal_power / (noise_power * 10**(snr_db/10)))
+                audio = audio + scaling_factor * noise
+                
         # Pitch shift (small variations)
         if random.random() < 0.3:
             n_steps = random.uniform(-0.5, 0.5)  # Small pitch shifts
             audio = librosa.effects.pitch_shift(audio, sr=self.sample_rate, n_steps=n_steps)
-        
-        # Gain adjustment
-        if random.random() < 0.2:
-            gain = random.uniform(0.8, 1.2)
-            audio = audio * gain
             
         # Clipping to prevent overflow
         audio = np.clip(audio, -1.0, 1.0)
         
         return audio
+    
+    def _generate_noise(self, length: int, noise_type: str = 'white') -> np.ndarray:
+        """
+        Generate different types of noise.
+        
+        Args:
+            length: Length of noise signal
+            noise_type: Type of noise ('white', 'pink', 'brown')
+            
+        Returns:
+            Noise signal
+        """
+        if noise_type == 'white':
+            return np.random.randn(length)
+        elif noise_type == 'pink':
+            # Simple pink noise approximation
+            white = np.random.randn(length)
+            # Apply a simple filter to approximate pink noise
+            pink = np.zeros_like(white)
+            pink[0] = white[0]
+            for i in range(1, length):
+                pink[i] = 0.997 * pink[i-1] + white[i] * 0.033
+            return pink
+        elif noise_type == 'brown':
+            # Brown noise (integration of white noise)
+            white = np.random.randn(length)
+            brown = np.cumsum(white)
+            # Normalize to same power as white noise
+            brown = brown / np.std(brown) * np.std(white)
+            return brown
+        else:
+            return np.random.randn(length)
     
     def _f0_to_classification_targets(self, f0_values: np.ndarray, voiced_mask: np.ndarray) -> torch.Tensor:
         """

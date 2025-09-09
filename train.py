@@ -7,6 +7,8 @@ import torch
 import torch.optim as optim
 import os
 import time
+# Import tqdm
+from tqdm import tqdm 
 from torch.utils.tensorboard import SummaryWriter
 from torch.optim.lr_scheduler import StepLR
 
@@ -29,9 +31,12 @@ def validate_model(model, val_loader, device, loss_params):
     total_val_reg_loss = 0.0
     num_batches = 0
     
+    # Wrap the validation loader with tqdm for progress bar
+    val_pbar = tqdm(val_loader, desc="Validation", leave=False)
+    
     with torch.no_grad():
-        # MODIFIED: Dataloader unpacking with new data
-        for audio, target_indices, target_f0 in val_loader:
+        # MODIFIED: Use tqdm progress bar for validation
+        for audio, target_indices, target_f0 in val_pbar:
             audio = audio.to(device)
             target_indices = target_indices.to(device)
             target_f0 = target_f0.to(device)
@@ -50,6 +55,9 @@ def validate_model(model, val_loader, device, loss_params):
             total_val_ce_loss += val_ce_loss.item()
             total_val_reg_loss += val_reg_loss.item()
             num_batches += 1
+            
+            # Update progress bar description with current batch loss
+            val_pbar.set_postfix({'Loss': f'{val_loss.item():.4f}'})
 
     model.train() # Return to training mode
     if num_batches > 0:
@@ -125,8 +133,13 @@ def main():
         
         epoch_start_time = time.time()
         
-        # MODIFIED: Dataloader unpacking
-        for batch_idx, (audio, target_indices, target_f0) in enumerate(train_loader):
+        # Wrap train_loader with tqdm
+        # MODIFIED: Use tqdm progress bar for training loop
+        train_pbar = tqdm(train_loader, desc=f"Epoch {epoch+1}/{num_epochs}", leave=True)
+        
+        # MODIFIED: Dataloader unpacking with tqdm
+        # for batch_idx, (audio, target_indices, target_f0) in enumerate(train_loader):
+        for batch_idx, (audio, target_indices, target_f0) in enumerate(train_pbar):
             audio, target_indices, target_f0 = audio.to(device), target_indices.to(device), target_f0.to(device)
             
             optimizer.zero_grad()
@@ -148,8 +161,15 @@ def main():
             total_train_reg_loss += reg_loss.item()
             num_train_batches += 1
             
-            if (batch_idx + 1) % 100 == 0:
-                print(f"  Batch {batch_idx+1}/{len(train_loader)}, Loss: {loss.item():.4f}")
+            # Update the progress bar description with current loss
+            train_pbar.set_postfix({
+                'Loss': f'{loss.item():.4f}',
+                'Avg_Loss': f'{total_train_loss / num_train_batches:.4f}'
+            })
+            
+            # Optional: Still print every 100 batches if you prefer
+            # if (batch_idx + 1) % 100 == 0:
+            #     print(f"  Batch {batch_idx+1}/{len(train_loader)}, Loss: {loss.item():.4f}")
 
         # --- End of Epoch ---
         epoch_time = time.time() - epoch_start_time
@@ -158,7 +178,9 @@ def main():
         avg_train_ce_loss = total_train_ce_loss / num_train_batches if num_train_batches > 0 else 0
         avg_train_reg_loss = total_train_reg_loss / num_train_batches if num_train_batches > 0 else 0
             
-        print(f"  Training Loss: {avg_train_loss:.4f} "
+        # Update the epoch summary print
+        print(f"  Epoch {epoch+1} Summary - "
+              f"Training Loss: {avg_train_loss:.4f} "
               f"(CE: {avg_train_ce_loss:.4f}, Reg: {avg_train_reg_loss:.4f}) "
               f"Time: {epoch_time:.2f}s")
 
@@ -166,6 +188,7 @@ def main():
         writer.add_scalar('Loss/Train_Classification', avg_train_ce_loss, epoch)
         writer.add_scalar('Loss/Train_Regression', avg_train_reg_loss, epoch)
         writer.add_scalar('Learning_Rate', optimizer.param_groups[0]['lr'], epoch)
+        writer.add_scalar('Time/Epoch', epoch_time, epoch) # Log epoch time
 
         # --- Validation ---
         if (epoch + 1) % TRAINING_PARAMS['validation_interval'] == 0:

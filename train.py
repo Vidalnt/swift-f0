@@ -5,6 +5,7 @@ This script handles the training loop, validation, checkpointing, and logging.
 
 import torch
 import torch.optim as optim
+from torch.nn.utils.rnn import pad_sequence
 import os
 import time
 from torch.utils.tensorboard import SummaryWriter

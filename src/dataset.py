@@ -5,7 +5,8 @@ import librosa
 import os
 from typing import Tuple, Optional, List
 import random
-import math
+from torch.nn.utils.rnn import pad_sequence
+
 class SwiftF0Dataset(Dataset):
     """
     Dataset class for SwiftF0 training.
@@ -103,10 +104,20 @@ class SwiftF0Dataset(Dataset):
         times = pitch_data[:, 0]
         f0_values = pitch_data[:, 1]
         
-        L = len(audio)
-        N = self.n_fft
-        H = self.hop_length
-        n_frames = 1 + int(math.ceil((L + N - 1) / H))
+        audio_tensor_for_stft = torch.from_numpy(audio).float()
+        dummy_stft = torch.stft(
+            audio_tensor_for_stft,
+            n_fft=self.n_fft,
+            hop_length=self.hop_length,
+            win_length=self.n_fft,
+            window=torch.hann_window(self.n_fft),
+            center=True,
+            pad_mode='reflect',
+            normalized=False,
+            onesided=True,
+            return_complex=True
+        )
+        n_frames = dummy_stft.size(1)
 
         frame_times = np.arange(n_frames) * self.hop_length / self.sample_rate
         f0_aligned = np.interp(frame_times, times, f0_values, left=0, right=0)
@@ -172,16 +183,54 @@ class SwiftF0Dataset(Dataset):
             
         return target_indices
 
+def swiftf0_collate_fn(batch):
+    """
+    Collation function for SwiftF0Dataset that handles variable-length sequences
+    by padding them to the length of the longest sequence in the batch.
+    Args:
+        batch: List of tuples (audio, target_indices, target_f0) from the dataset.
+    Returns:
+        Tuple of batched and padded tensors: (audio_batch, target_indices_batch, target_f0_batch)
+    """
+    audios, target_indices, target_f0s = zip(*batch) # Unpack the tuple
+
+    # Convert to list if necessary (although zip already creates a kind of list)
+    audios = list(audios)
+    target_indices = list(target_indices)
+    target_f0s = list(target_f0s)
+
+    # --- 1. Padding for audios ---
+    # audios is a list of tensors of shape [1, L_i]
+    # Remove channel dimension: [1, L_i] -> [L_i]
+    audios_1d = [audio.squeeze(0) for audio in audios] # List of [L_i]
+    # Pad to the maximum length in the batch
+    padded_audios_1d = pad_sequence(audios_1d, batch_first=True, padding_value=0.0) # [B, L_max]
+    # Add channel dimension again: [B, L_max] -> [B, 1, L_max]
+    audio_batch = padded_audios_1d.unsqueeze(1) # [B, 1, L_max]
+
+    # --- 2. Padding for target_indices ---
+    # target_indices is a list of tensors of shape [T_i]
+    target_indices_batch = pad_sequence(target_indices, batch_first=True, padding_value=-100) # [B, T_max]
+
+    # --- 3. Padding for target_f0 ---
+    # target_f0s is a list of tensors of shape [T_i]
+    target_f0_batch = pad_sequence(target_f0s, batch_first=True, padding_value=0.0) # [B, T_max]
+
+    return audio_batch, target_indices_batch, target_f0_batch
+
 def create_dataloader(data_paths: List[str], 
                       batch_size: int = 32, 
                       shuffle: bool = True, 
-                      num_workers: int = 4,
-                      collate_fn = None,
+                      num_workers: int = 2, # Reduced to avoid warnings
                       **kwargs) -> DataLoader:
-    """
-    Create a DataLoader for SwiftF0 training.
-    """
+    """Create a DataLoader for SwiftF0 training."""
     dataset = SwiftF0Dataset(data_paths, **kwargs)
-    
-    return DataLoader(dataset, batch_size=batch_size, shuffle=shuffle, 
-                    num_workers=num_workers, pin_memory=True, collate_fn=collate_fn)
+    # Pass the custom collate function
+    return DataLoader(
+        dataset, 
+        batch_size=batch_size, 
+        shuffle=shuffle, 
+        num_workers=num_workers,
+        collate_fn=swiftf0_collate_fn, # <<< Use the custom collate_fn here
+        pin_memory=True # Optional, can help with GPU performance
+    )

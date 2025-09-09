@@ -2,7 +2,6 @@ import os
 # --- Data Paths ---
 # Define your dataset directories here
 # The dataloader in dataset.py will search these paths for .wav/.f0 pairs
-DATA_ROOT = "path/to/your/dataset" # e.g., "data/MIR1K" or "data"
 TRAIN_DATA_PATHS = [
     'data/train',           # MIR-1K
     'data/train_ptdb',      # PTDB-TUG

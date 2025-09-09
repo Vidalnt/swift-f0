@@ -5,7 +5,7 @@ import librosa
 import os
 from typing import Tuple, Optional, List
 import random
-
+import math
 class SwiftF0Dataset(Dataset):
     """
     Dataset class for SwiftF0 training.
@@ -103,7 +103,11 @@ class SwiftF0Dataset(Dataset):
         times = pitch_data[:, 0]
         f0_values = pitch_data[:, 1]
         
-        n_frames = int(np.ceil(len(audio) / self.hop_length))
+        L = len(audio)
+        N = self.n_fft
+        H = self.hop_length
+        n_frames = 1 + int(math.ceil((L + N - 1) / H))
+
         frame_times = np.arange(n_frames) * self.hop_length / self.sample_rate
         f0_aligned = np.interp(frame_times, times, f0_values, left=0, right=0)
         

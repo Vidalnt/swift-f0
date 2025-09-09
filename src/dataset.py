@@ -134,11 +134,7 @@ class SwiftF0Dataset(Dataset):
         # MODIFIED: Target tensor must be of type Long
         target_indices_tensor = torch.from_numpy(target_indices).long()
         
-        return {
-            "audio": audio_tensor,
-            "target_indices": target_indices_tensor,
-            "target_f0": target_f0_tensor
-        }
+        return audio_tensor, target_indices_tensor, target_f0_tensor
     
     def _augment_audio(self, audio: np.ndarray) -> np.ndarray:
         """Apply data augmentation: gain and noise."""

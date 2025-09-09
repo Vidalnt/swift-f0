@@ -20,7 +20,7 @@ def convert_vocadito_dataset(csv_input_dir: str, f0_output_dir: str):
             rel_clean = rel.with_name(stem_without_f0 + rel.suffix)
             out_path = out / rel_clean
             out_path.parent.mkdir(parents=True, exist_ok=True)
-            np.savetxt(out_path, data, fmt='%.6f\t%.3f', header='time_sec\tfreq_hz', comments='')
+            np.savetxt(out_path, data, fmt='%.6f\t%.3f', comments='')
         except Exception as e:
             print(f"Error processing {p}: {e}")
 

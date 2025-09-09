@@ -20,7 +20,7 @@ def convert_mir1k_dataset(pv_directory, output_directory, hop_length, sample_rat
             hz_values = midi_to_hz(midi_notes)
             output_data = np.column_stack((frame_times, hz_values))
             output_path = out / (pv_path.stem + '.f0')
-            np.savetxt(output_path, output_data, fmt='%.4f\t%.4f', header='time_sec\tfreq_hz', comments='')
+            np.savetxt(output_path, output_data, fmt='%.4f\t%.4f', comments='')
         except Exception as e:
             print(f"Error processing {pv_path}: {e}")
 

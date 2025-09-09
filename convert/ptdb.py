@@ -60,7 +60,7 @@ def convert_ptdb_dataset_smart(base_data_dir, f0_folder_name='REF', wav_folder_n
                 continue
             
             out_path.parent.mkdir(parents=True, exist_ok=True)
-            np.savetxt(out_path, out_data, fmt='%.4f\t%.4f', header='time_sec\tfreq_hz', comments='')
+            np.savetxt(out_path, out_data, fmt='%.4f\t%.4f', comments='')
             processed += 1
         except Exception as e:
             print(f"Error processing {f0_path}: {e}")

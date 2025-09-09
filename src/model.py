@@ -118,6 +118,10 @@ class SwiftF0Model(nn.Module):
         """
         # Compute STFT internally (matching paper parameters)
         # x is raw audio [batch, samples]
+
+        if x.dim() == 3 and x.shape[1] == 1:
+            x = x.squeeze(1)
+
         stft = torch.stft(
             x, 
             n_fft=self.n_fft, 

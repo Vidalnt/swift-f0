@@ -1,5 +1,4 @@
 import os
-
 # --- Data Paths ---
 # Define your dataset directories here
 # The dataloader in dataset.py will search these paths for .wav/.f0 pairs
@@ -31,7 +30,7 @@ TRAINING_PARAMS = {
     'num_epochs': 100,
     'batch_size': 32,
     'learning_rate': 1e-3,
-    'device': "cuda" if torch.cuda.is_available() else "cpu",
+    'device': "cuda",
     'checkpoint_interval': 10, # Save checkpoint every N epochs
     'validation_interval': 5,  # Run validation every N epochs
     'use_augmentation': True,  # Enable data augmentation

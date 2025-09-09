@@ -119,7 +119,11 @@ class SwiftF0Dataset(Dataset):
         # MODIFIED: Target tensor must be of type Long
         target_indices_tensor = torch.from_numpy(target_indices).long()
         
-        return audio_tensor, target_indices_tensor, target_f0_tensor
+        return {
+            "audio": audio_tensor,
+            "target_indices": target_indices_tensor,
+            "target_f0": target_f0_tensor
+        }
     
     def _augment_audio(self, audio: np.ndarray) -> np.ndarray:
         """Apply data augmentation: gain and noise."""
@@ -168,7 +172,12 @@ def create_dataloader(data_paths: List[str],
                       batch_size: int = 32, 
                       shuffle: bool = True, 
                       num_workers: int = 4,
+                      collate_fn = None,
                       **kwargs) -> DataLoader:
-    """Create a DataLoader for SwiftF0 training."""
+    """
+    Create a DataLoader for SwiftF0 training.
+    """
     dataset = SwiftF0Dataset(data_paths, **kwargs)
-    return DataLoader(dataset, batch_size=batch_size, shuffle=shuffle, num_workers=num_workers)
+    
+    return DataLoader(dataset, batch_size=batch_size, shuffle=shuffle, 
+                    num_workers=num_workers, pin_memory=True, collate_fn=collate_fn)

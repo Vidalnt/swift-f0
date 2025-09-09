@@ -21,6 +21,29 @@ from config import (MODEL_PARAMS, TRAINING_PARAMS, DATALOADER_PARAMS,
                     LOSS_PARAMS, MODEL_SAVE_PATH, LOG_DIR, 
                     TRAIN_DATA_PATHS, VAL_DATA_PATHS)
 
+def swift_collate_fn(batch):
+    """
+    Custom collate_fn for handling sequences of different lengths.
+    Pads audio and labels batch to the maximum length of the batch.
+    """
+    # Separate data by key
+    audios = [item['audio'].squeeze(0) for item in batch]  # Remove channel dimension [1, L] -> [L]
+    target_indices = [item['target_indices'] for item in batch]
+    target_f0s = [item['target_f0'] for item in batch]
+
+    # Pad audio sequences
+    # batch_first=True -> [B, L_max]
+    audios_padded = pad_sequence(audios, batch_first=True, padding_value=0.0)
+    # Add channel dimension again for the model -> [B, 1, L_max]
+    audios_padded = audios_padded.unsqueeze(1)
+
+    # Pad label sequences
+    # The padding value for indices should be the ignore_index
+    indices_padded = pad_sequence(target_indices, batch_first=True, padding_value=-100)
+    # The padding value for F0 can be 0.0 (represents unvoiced)
+    f0s_padded = pad_sequence(target_f0s, batch_first=True, padding_value=0.0)
+
+    return audios_padded, indices_padded, f0s_padded
 
 def validate_model(model, val_loader, device, loss_params):
     """Performs model validation."""
@@ -82,6 +105,7 @@ def main():
         batch_size=TRAINING_PARAMS['batch_size'],
         shuffle=DATALOADER_PARAMS['shuffle_train'],
         num_workers=DATALOADER_PARAMS['num_workers'],
+        collate_fn=swift_collate_fn,
         **{k: v for k, v in MODEL_PARAMS.items() if k not in ("k_min", "k_max")} # Pass model parameters like hop_length to dataset
     )
     val_loader = create_dataloader(
@@ -89,6 +113,7 @@ def main():
         batch_size=TRAINING_PARAMS['batch_size'],
         shuffle=DATALOADER_PARAMS['shuffle_val'],
         num_workers=DATALOADER_PARAMS['num_workers'],
+        collate_fn=swift_collate_fn,
         **{k: v for k, v in MODEL_PARAMS.items() if k not in ("k_min", "k_max")}
     )
     print("DataLoaders created.")

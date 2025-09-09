@@ -82,14 +82,14 @@ def main():
         batch_size=TRAINING_PARAMS['batch_size'],
         shuffle=DATALOADER_PARAMS['shuffle_train'],
         num_workers=DATALOADER_PARAMS['num_workers'],
-        **MODEL_PARAMS # Pass model parameters like hop_length to dataset
+        **{k: v for k, v in MODEL_PARAMS.items() if k not in ("k_min", "k_max")} # Pass model parameters like hop_length to dataset
     )
     val_loader = create_dataloader(
         VAL_DATA_PATHS, 
         batch_size=TRAINING_PARAMS['batch_size'],
         shuffle=DATALOADER_PARAMS['shuffle_val'],
         num_workers=DATALOADER_PARAMS['num_workers'],
-        **MODEL_PARAMS
+        **{k: v for k, v in MODEL_PARAMS.items() if k not in ("k_min", "k_max")}
     )
     print("DataLoaders created.")
     

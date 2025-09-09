@@ -2,8 +2,9 @@ import torch
 import numpy as np
 import os
 from typing import List, Tuple
+import matplotlib
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
-import librosa.display
 
 def find_audio_files(data_dir: str, extensions: List[str] = ['.wav']) -> List[str]:
     """

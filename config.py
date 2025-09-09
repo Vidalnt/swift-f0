@@ -4,14 +4,17 @@ import os
 # Define your dataset directories here
 # The dataloader in dataset.py will search these paths for .wav/.f0 pairs
 DATA_ROOT = "path/to/your/dataset" # e.g., "data/MIR1K" or "data"
-TRAIN_DATA_PATHS = [os.path.join(DATA_ROOT, "train")] # Can be a list of dirs/files
-VAL_DATA_PATHS = [os.path.join(DATA_ROOT, "val")]
-# TEST_DATA_PATHS = [os.path.join(DATA_ROOT, "test")] # For final evaluation
-
+TRAIN_DATA_PATHS = [
+    'data/train',           # MIR-1K
+    'data/train_ptdb',      # PTDB-TUG
+]
+VAL_DATA_PATHS = [
+    'data/val'     # Vocadito
+]
 # --- Model Parameters ---
 # These are the key parameters you want to configure for your custom training
 MODEL_PARAMS = {
-    'n_bins': 360,        # <<< YOUR CUSTOM VALUE <<<
+    'n_bins': 200,        # <<< YOUR CUSTOM VALUE <<<
     'f_min': 46.875,      # Minimum frequency in Hz (standard for SwiftF0/CREPE)
     'f_max': 2093.75,     # Maximum frequency in Hz (standard for SwiftF0)
     'sample_rate': 16000, # Audio sample rate (standard)
